@@ -227,6 +227,16 @@
     let currentCourse = null;
     let liveRosterData = [];
 
+    async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        return await fetch(url, { ...options, signal: controller.signal });
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
+    }
+
     async function handleAdminLogin() {
       const id = document.getElementById("adminIdInput").value.trim();
       if (!id) return alert("請輸入經辦工號！");
@@ -236,7 +246,7 @@
       btn.innerText = "驗證中...";
 
       try {
-        const res = await fetch(`${GAS_URL}?action=adminLogin&adminId=${encodeURIComponent(id)}`);
+        const res = await fetchWithTimeout(`${GAS_URL}?action=adminLogin&adminId=${encodeURIComponent(id)}`);
         const data = await res.json();
         if (data.status === "success") {
           currentAdmin = data.admin;
@@ -251,7 +261,10 @@
           alert(data.message || "驗證失敗，請確認白名單！");
         }
       } catch (err) {
-        alert("連線異常，請確認網路！");
+        if (err.name === "AbortError") {
+          alert("驗證逾時（15 秒）。請檢查 Apps Script 部署與 Google 試算表權限後再試。");
+        } else {
+          alert("連線異常，請確認網路！");
       } finally {
         btn.disabled = false;
         btn.innerText = "驗證並登入";
