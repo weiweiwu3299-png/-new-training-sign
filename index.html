@@ -268,11 +268,7 @@
       document.getElementById("detailTitle").innerText = "載入訓練內容中...";
       document.getElementById("detailContent").innerText = "正在從雲端載入重點條目...";
 
-      savedSignatureBase64 = "";
-      document.getElementById("openSigCanvasBtn").classList.remove("hidden");
-      document.getElementById("signedPreviewBox").classList.add("hidden");
-      document.getElementById("agreeCheck").checked = false;
-      validateSignForm();
+      resetSignatureForCourse();
 
       try {
         const res = await fetch(`${GAS_URL}?action=getCourseDetail&fileId=${fileId}`);
@@ -334,6 +330,19 @@
     ctx.strokeStyle = "#000000";
     ctx.lineWidth = 3.5;
     ctx.lineCap = "round";
+
+    // 每次進入課程都必須重新親筆簽名，不能沿用上一門課的畫布內容或簽名圖檔。
+    function resetSignatureForCourse() {
+      savedSignatureBase64 = "";
+      hasDrawn = false;
+      isDrawing = false;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      document.getElementById("sigPreviewImg").removeAttribute("src");
+      document.getElementById("openSigCanvasBtn").classList.remove("hidden");
+      document.getElementById("signedPreviewBox").classList.add("hidden");
+      document.getElementById("agreeCheck").checked = false;
+      validateSignForm();
+    }
 
     function getCanvasPos(e) {
       const rect = canvas.getBoundingClientRect();
