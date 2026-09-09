@@ -158,10 +158,20 @@
 
   <script>
     const GAS_URL = "https://script.google.com/macros/s/AKfycbyGT6xpXAsads6FAzH8bmh9fQeJ69PNT2pkN6lq3Ceth1YhX9z_gct7RLN6qBy4udRk/exec";
+    const STUDENT_SESSION_KEY = "trainingPlatformStudentId";
 
     let currentStudent = null;
     let activeCourseFileId = null;
     let savedSignatureBase64 = "";
+
+    function openStudentPortal(data) {
+      currentStudent = { empId: data.empId, name: data.name };
+      document.getElementById("welcomeName").innerText = currentStudent.name;
+      document.getElementById("displayEmpId").innerText = currentStudent.empId;
+      document.getElementById("studentLoginBox").classList.add("hidden");
+      document.getElementById("studentPortal").classList.remove("hidden");
+      renderPendingList(data.pendingCourses || []);
+    }
 
     async function handleStudentLogin() {
       const empId = document.getElementById("loginEmpId").value.trim();
@@ -177,12 +187,8 @@
         if (data.status === "success") {
           // 只輸出到瀏覽器主控台，便於確認目前 /exec 是否已部署新版，以及哪一筆課程被略過。
           console.info("待簽課程診斷", data.debugLogs || []);
-          currentStudent = { empId: data.empId, name: data.name };
-          document.getElementById("welcomeName").innerText = currentStudent.name;
-          document.getElementById("displayEmpId").innerText = currentStudent.empId;
-          document.getElementById("studentLoginBox").classList.add("hidden");
-          document.getElementById("studentPortal").classList.remove("hidden");
-          renderPendingList(data.pendingCourses);
+          localStorage.setItem(STUDENT_SESSION_KEY, data.empId);
+          openStudentPortal(data);
         } else {
           alert("查無此工號或連線異常！");
         }
@@ -196,10 +202,32 @@
 
     function logoutStudent() {
       currentStudent = null;
+      localStorage.removeItem(STUDENT_SESSION_KEY);
       document.getElementById("studentPortal").classList.add("hidden");
       document.getElementById("signModalView").classList.add("hidden");
       document.getElementById("studentLoginBox").classList.remove("hidden");
+      document.getElementById("loginEmpId").value = "";
     }
+
+    async function restoreStudentSession() {
+      const savedId = localStorage.getItem(STUDENT_SESSION_KEY);
+      if (!savedId) return;
+
+      document.getElementById("loginEmpId").value = savedId;
+      try {
+        const res = await fetch(`${GAS_URL}?action=getStudentPendingCourses&empId=${encodeURIComponent(savedId)}`);
+        const data = await res.json();
+        if (data.status === "success") {
+          openStudentPortal(data);
+        } else {
+          localStorage.removeItem(STUDENT_SESSION_KEY);
+        }
+      } catch (err) {
+        // 網路暫時中斷時保留記憶；使用者可重整或手動再次登入。
+      }
+    }
+
+    document.addEventListener("DOMContentLoaded", restoreStudentSession);
 
     function renderPendingList(courses) {
       const container = document.getElementById("pendingListContainer");
