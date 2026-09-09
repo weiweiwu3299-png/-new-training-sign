@@ -187,7 +187,7 @@
         if (data.status === "success") {
           // 只輸出到瀏覽器主控台，便於確認目前 /exec 是否已部署新版，以及哪一筆課程被略過。
           console.info("待簽課程診斷", data.debugLogs || []);
-          localStorage.setItem(STUDENT_SESSION_KEY, data.empId);
+          localStorage.setItem(STUDENT_SESSION_KEY, JSON.stringify({ empId: data.empId, name: data.name }));
           openStudentPortal(data);
         } else {
           alert("查無此工號或連線異常！");
@@ -210,20 +210,18 @@
     }
 
     async function restoreStudentSession() {
-      const savedId = localStorage.getItem(STUDENT_SESSION_KEY);
-      if (!savedId) return;
+      const savedSession = localStorage.getItem(STUDENT_SESSION_KEY);
+      if (!savedSession) return;
 
-      document.getElementById("loginEmpId").value = savedId;
       try {
-        const res = await fetch(`${GAS_URL}?action=getStudentPendingCourses&empId=${encodeURIComponent(savedId)}`);
-        const data = await res.json();
-        if (data.status === "success") {
-          openStudentPortal(data);
-        } else {
-          localStorage.removeItem(STUDENT_SESSION_KEY);
-        }
+        const savedStudent = JSON.parse(savedSession);
+        if (!savedStudent || !savedStudent.empId || !savedStudent.name) throw new Error("舊版登入記憶");
+        document.getElementById("loginEmpId").value = savedStudent.empId;
+        openStudentPortal({ empId: savedStudent.empId, name: savedStudent.name, pendingCourses: [] });
+        refreshStudentPending();
       } catch (err) {
-        // 網路暫時中斷時保留記憶；使用者可重整或手動再次登入。
+        // 舊版只記錄工號時，保留在輸入框讓使用者登入一次以升級為完整登入狀態。
+        document.getElementById("loginEmpId").value = savedSession;
       }
     }
 
