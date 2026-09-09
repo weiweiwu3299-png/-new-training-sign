@@ -261,7 +261,7 @@
         const res = await fetchWithTimeout(`${GAS_URL}?action=adminLogin&adminId=${encodeURIComponent(id)}`);
         const data = await res.json();
         if (data.status === "success") {
-          localStorage.setItem(ADMIN_SESSION_KEY, data.admin.id);
+          localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(data.admin));
           openAdminDashboard(data.admin);
         } else {
           alert(data.message || "驗證失敗，請確認白名單！");
@@ -342,20 +342,17 @@
     }
 
     async function restoreAdminSession() {
-      const savedId = localStorage.getItem(ADMIN_SESSION_KEY);
-      if (!savedId) return;
+      const savedSession = localStorage.getItem(ADMIN_SESSION_KEY);
+      if (!savedSession) return;
 
-      document.getElementById("adminIdInput").value = savedId;
       try {
-        const res = await fetchWithTimeout(`${GAS_URL}?action=adminLogin&adminId=${encodeURIComponent(savedId)}`);
-        const data = await res.json();
-        if (data.status === "success") {
-          openAdminDashboard(data.admin);
-        } else {
-          localStorage.removeItem(ADMIN_SESSION_KEY);
-        }
+        const savedAdmin = JSON.parse(savedSession);
+        if (!savedAdmin || !savedAdmin.id || !savedAdmin.name) throw new Error("舊版登入記憶");
+        document.getElementById("adminIdInput").value = savedAdmin.id;
+        openAdminDashboard(savedAdmin);
       } catch (err) {
-        // 網路暫時中斷時保留記憶；使用者可重整或手動再次登入。
+        // 舊版只記錄工號時，保留在輸入框讓使用者登入一次以升級為完整登入狀態。
+        document.getElementById("adminIdInput").value = savedSession;
       }
     }
 
