@@ -190,6 +190,7 @@
           localStorage.setItem(STUDENT_SESSION_KEY, JSON.stringify({ empId: data.empId, name: data.name }));
           openStudentPortal(data);
         } else {
+          localStorage.removeItem(STUDENT_SESSION_KEY);
           alert("查無此工號或連線異常！");
         }
       } catch (err) {
@@ -313,6 +314,10 @@
         const data = await res.json();
         if (data.status === "success") {
           renderPendingList(data.pendingCourses);
+        } else {
+          // 若舊瀏覽器記憶的是不在公司名冊的工號，立即清除登入狀態。
+          logoutStudent();
+          alert(data.message || "登入狀態已失效，請重新輸入公司工號。");
         }
       } catch (e) {}
     }
