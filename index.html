@@ -163,6 +163,7 @@
     let currentStudent = null;
     let activeCourseFileId = null;
     let savedSignatureBase64 = "";
+    let currentPendingCourses = [];
 
     function openStudentPortal(data) {
       currentStudent = { empId: data.empId, name: data.name };
@@ -229,11 +230,12 @@
     document.addEventListener("DOMContentLoaded", restoreStudentSession);
 
     function renderPendingList(courses) {
+      currentPendingCourses = Array.isArray(courses) ? courses : [];
       const container = document.getElementById("pendingListContainer");
       const badge = document.getElementById("pendingCountBadge");
-      badge.innerText = `${courses.length} 門待簽`;
+      badge.innerText = `${currentPendingCourses.length} 門待簽`;
 
-      if (courses.length === 0) {
+      if (currentPendingCourses.length === 0) {
         container.innerHTML = `
           <div class="text-center py-8 space-y-2">
             <div class="text-emerald-500 text-5xl font-bold">✓</div>
@@ -245,7 +247,7 @@
       }
 
       container.innerHTML = "";
-      courses.forEach(c => {
+      currentPendingCourses.forEach(c => {
         const card = document.createElement("div");
         card.className = "p-4 border border-amber-200 bg-amber-50/60 rounded-xl space-y-2 hover:bg-amber-100/60 transition cursor-pointer";
         card.onclick = () => openSignCourse(c.fileId);
@@ -302,15 +304,18 @@
       }
     }
 
-    function closeSignModalView() {
+    function closeSignModalView(skipImmediateRefresh = false) {
       document.getElementById("signModalView").classList.add("hidden");
       document.getElementById("studentPortal").classList.remove("hidden");
-      refreshStudentPending();
+      if (!skipImmediateRefresh) refreshStudentPending();
     }
 
-    async function refreshStudentPending() {
+    async function refreshStudentPending(forceFresh = false) {
       try {
-        const res = await fetch(`${GAS_URL}?action=getStudentPendingCourses&empId=${encodeURIComponent(currentStudent.empId)}`);
+        const freshParam = forceFresh ? `&fresh=1&t=${Date.now()}` : "";
+        const res = await fetch(`${GAS_URL}?action=getStudentPendingCourses&empId=${encodeURIComponent(currentStudent.empId)}${freshParam}`, {
+          cache: forceFresh ? "no-store" : "default"
+        });
         const data = await res.json();
         if (data.status === "success") {
           renderPendingList(data.pendingCourses);
@@ -320,6 +325,10 @@
           alert(data.message || "登入狀態已失效，請重新輸入公司工號。");
         }
       } catch (e) {}
+    }
+
+    function removeCompletedCourseFromView(fileId) {
+      renderPendingList(currentPendingCourses.filter(course => course.fileId !== fileId));
     }
 
     function openLightbox(url) {
@@ -427,8 +436,13 @@
           body: JSON.stringify(payload)
         });
 
-        alert("簽核成功！已為您從待辦清單中移除。");
-        closeSignModalView();
+        const completedFileId = activeCourseFileId;
+        removeCompletedCourseFromView(completedFileId);
+        closeSignModalView(true);
+        alert("簽核成功！已立即從待辦清單中移除。");
+        // no-cors 無法直接讀取伺服器回應；稍後以強制查詢確認簽核已寫入試算表。
+        window.setTimeout(() => refreshStudentPending(true), 1200);
+        window.setTimeout(() => refreshStudentPending(true), 4000);
       } catch (err) {
         alert("送出異常，請檢查手機網路！");
         validateSignForm();
