@@ -31,7 +31,7 @@
       </div>
 
       <div class="space-y-3">
-        <input type="text" id="loginEmpId" placeholder="請輸入工號 (如 N000163299)" class="w-full border-2 border-slate-300 rounded-xl p-3 text-center text-base font-bold outline-none focus:border-blue-500">
+        <input type="text" id="loginEmpId" placeholder="請輸入工號 (如 N000143451)" class="w-full border-2 border-slate-300 rounded-xl p-3 text-center text-base font-bold outline-none focus:border-blue-500">
         <button type="button" onclick="handleStudentLogin()" id="studentLoginBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl text-base shadow transition">
           查詢我的待完成課程
         </button>
@@ -175,6 +175,8 @@
         const res = await fetch(`${GAS_URL}?action=getStudentPendingCourses&empId=${encodeURIComponent(empId)}`);
         const data = await res.json();
         if (data.status === "success") {
+          // 只輸出到瀏覽器主控台，便於確認目前 /exec 是否已部署新版，以及哪一筆課程被略過。
+          console.info("待簽課程診斷", data.debugLogs || []);
           currentStudent = { empId: data.empId, name: data.name };
           document.getElementById("welcomeName").innerText = currentStudent.name;
           document.getElementById("displayEmpId").innerText = currentStudent.empId;
