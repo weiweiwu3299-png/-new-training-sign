@@ -51,6 +51,20 @@
         </div>
       </div>
 
+      <!-- 學員端 QR Code -->
+      <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col sm:flex-row items-center gap-4">
+        <div id="studentPortalQr" class="bg-white p-2 border border-slate-200 rounded-xl shrink-0"></div>
+        <div class="w-full min-w-0 space-y-2 text-center sm:text-left">
+          <div>
+            <h3 class="text-sm font-bold text-slate-800">學員端掃碼入口</h3>
+            <p class="text-xs text-slate-500">同仁掃描後可直接開啟教育訓練簽核平台。</p>
+          </div>
+          <input id="studentPortalUrl" type="text" readonly class="w-full border rounded-lg px-2.5 py-2 text-xs text-slate-600 bg-slate-50" aria-label="學員端網址">
+          <button type="button" onclick="copyStudentPortalUrl()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold">複製學員端網址</button>
+          <p id="studentPortalQrHint" class="hidden text-xs text-amber-700"></p>
+        </div>
+      </div>
+
       <!-- 開課表單 -->
       <div id="createCourseCard" class="hidden bg-white p-6 rounded-2xl shadow-sm border border-blue-300 space-y-4">
         <div class="flex justify-between items-center border-b pb-3">
@@ -230,6 +244,7 @@
           document.getElementById("currentAdminId").innerText = currentAdmin.id;
           document.getElementById("loginCard").classList.add("hidden");
           document.getElementById("mainDashboard").classList.remove("hidden");
+          renderStudentPortalQr();
           loadDepartmentCheckboxes();
           loadMyCourses();
         } else {
@@ -240,6 +255,61 @@
       } finally {
         btn.disabled = false;
         btn.innerText = "驗證並登入";
+      }
+    }
+
+    function getStudentPortalUrl() {
+      const url = new URL(window.location.href);
+      url.search = "";
+      url.hash = "";
+      if (/\/admin\.html$/i.test(url.pathname)) {
+        url.pathname = url.pathname.replace(/admin\.html$/i, "index.html");
+      } else if (/\/$/.test(url.pathname)) {
+        url.pathname += "index.html";
+      } else {
+        url.pathname = url.pathname.replace(/[^/]*$/, "index.html");
+      }
+      return url.href;
+    }
+
+    function renderStudentPortalQr() {
+      const url = getStudentPortalUrl();
+      const qrBox = document.getElementById("studentPortalQr");
+      const urlInput = document.getElementById("studentPortalUrl");
+      const hint = document.getElementById("studentPortalQrHint");
+      urlInput.value = url;
+      qrBox.innerHTML = "";
+
+      if (window.location.protocol === "file:") {
+        hint.innerText = "目前是本機檔案預覽。部署到可公開存取的網址後，手機掃碼才能開啟平台。";
+        hint.classList.remove("hidden");
+        return;
+      }
+
+      if (typeof QRCode !== "function") {
+        qrBox.innerText = "QR Code 載入失敗";
+        return;
+      }
+
+      new QRCode(qrBox, {
+        text: url,
+        width: 132,
+        height: 132,
+        colorDark: "#0f172a",
+        colorLight: "#ffffff",
+        correctLevel: QRCode.CorrectLevel.M
+      });
+    }
+
+    async function copyStudentPortalUrl() {
+      const input = document.getElementById("studentPortalUrl");
+      try {
+        await navigator.clipboard.writeText(input.value);
+        alert("學員端網址已複製");
+      } catch (err) {
+        input.select();
+        document.execCommand("copy");
+        alert("學員端網址已複製");
       }
     }
 
