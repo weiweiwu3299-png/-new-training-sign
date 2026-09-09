@@ -120,11 +120,11 @@
             </div>
           </div>
 
-          <!-- 最多 8 張教材圖片 -->
+          <!-- 最多 4 張教材圖片 -->
           <div class="border rounded-xl p-4 bg-slate-50 space-y-3">
             <div class="flex justify-between items-center">
-              <label class="block text-xs font-bold text-slate-700">🖼️ 教材圖片上傳 (最多 8 張)</label>
-              <span id="imgCountBadge" class="text-xs text-blue-600 font-semibold">0 / 8 張</span>
+              <label class="block text-xs font-bold text-slate-700">🖼️ 教材圖片上傳 (最多 4 張)</label>
+              <span id="imgCountBadge" class="text-xs text-blue-600 font-semibold">0 / 4 張</span>
             </div>
             <input type="file" id="imageUploader" accept="image/*" multiple class="text-xs text-slate-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:bg-blue-50 file:text-blue-700">
             <div id="imagePreviewGrid" class="grid grid-cols-2 md:grid-cols-4 gap-3 pt-1"></div>
@@ -705,7 +705,7 @@
 
     document.getElementById("imageUploader").addEventListener("change", async function(e) {
       const files = Array.from(e.target.files);
-      if (uploadedImages.length + files.length > 8) return alert("最多只能上傳 8 張！");
+      if (uploadedImages.length + files.length > 4) return alert("最多只能上傳 4 張！");
       for (const file of files) {
         const b64 = await compressImage(file);
         uploadedImages.push({ base64: b64, note: "" });
@@ -716,7 +716,7 @@
     function renderImagePreviews() {
       const grid = document.getElementById("imagePreviewGrid");
       grid.innerHTML = "";
-      document.getElementById("imgCountBadge").innerText = `${uploadedImages.length} / 8 張`;
+      document.getElementById("imgCountBadge").innerText = `${uploadedImages.length} / 4 張`;
       uploadedImages.forEach((img, idx) => {
         const card = document.createElement("div");
         card.className = "border rounded-lg p-2 bg-white text-center space-y-1 relative";
