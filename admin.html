@@ -256,8 +256,9 @@
       localStorage.removeItem(ADMIN_CACHE_PREFIX + key);
     }
 
-    // Apps Script 新部署或閒置後的第一次呼叫可能較慢；30 秒可避免正常冷啟動被誤判逾時。
-    async function fetchWithTimeout(url, options = {}, timeoutMs = 30000) {
+    // Apps Script 新部署、冷啟動或同時執行 PDF 匯出時可能超過 30 秒；
+    // 登入不可過早中止，避免把可正常完成的驗證誤判為失敗。
+    async function fetchWithTimeout(url, options = {}, timeoutMs = 90000) {
       const controller = new AbortController();
       const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
       try {
@@ -303,7 +304,7 @@
         }
       } catch (err) {
         if (err.name === "AbortError") {
-          alert("驗證逾時（30 秒）。請確認 Apps Script 部署已完成，稍後再試一次。");
+          alert("驗證逾時（90 秒）。Apps Script 目前未回應，請稍後再試一次。");
         } else {
           alert("連線異常，請確認網路！");
         }
