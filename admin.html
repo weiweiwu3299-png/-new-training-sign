@@ -80,7 +80,7 @@
       </div>
     </div>
 
-    <!-- 2. 經辦作業儀表板 (登入後顯示) -->
+    <!-- 2. 經辦作業儀表板 -->
     <div id="dashboardSection" class="hidden space-y-6">
       
       <!-- 上方功能頁籤切換 -->
@@ -123,12 +123,44 @@
 
           <!-- 部門受訓對象挑選 -->
           <div>
-            <label class="block text-xs font-bold text-slate-700 mb-1.5 flex justify-between items-center">
-              <span>選擇應訓部門 (名冊自動納入) <span class="text-red-500">*</span></span>
-              <span class="text-slate-400 font-normal text-xs">已勾選部門會自動發送 LINE 提醒</span>
-            </label>
+            <div class="flex justify-between items-center mb-1.5">
+              <label class="block text-xs font-bold text-slate-700">
+                選擇應訓部門 (勾選後自動載入人員) <span class="text-red-500">*</span>
+              </label>
+              <div class="space-x-2 text-xs">
+                <button type="button" onclick="selectAllDepts(true)" class="text-blue-600 hover:underline">全選</button>
+                <span class="text-slate-300">|</span>
+                <button type="button" onclick="selectAllDepts(false)" class="text-slate-500 hover:underline">清空</button>
+              </div>
+            </div>
             <div id="deptCheckboxList" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200 text-sm">
               <span class="text-xs text-slate-400 flex items-center gap-1"><i class="fa-solid fa-spinner fa-spin"></i> 正在載入部門清單...</span>
+            </div>
+          </div>
+
+          <!-- 【核心功能】應訓人員清單與人工增刪區域 -->
+          <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+            <div class="flex justify-between items-center">
+              <div>
+                <label class="text-xs font-bold text-slate-700">本次應訓人員名單</label>
+                <span id="rosterCountBadge" class="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 font-bold rounded-full text-xs">0 人</span>
+              </div>
+              <span class="text-[11px] text-slate-400">點擊人員標籤上的 ✕ 可剔除人員</span>
+            </div>
+
+            <!-- 人員標籤容器 -->
+            <div id="selectedRosterContainer" class="flex flex-wrap gap-2 max-h-48 overflow-y-auto custom-scrollbar p-2 bg-white rounded-lg border border-slate-200 min-h-[50px] items-center">
+              <span class="text-xs text-slate-400 italic">尚未選取任何部門或人員...</span>
+            </div>
+
+            <!-- 手動單筆增加人員 -->
+            <div class="pt-2 border-t border-slate-200 flex flex-wrap gap-2 items-center">
+              <span class="text-xs font-semibold text-slate-600"><i class="fa-solid fa-user-plus text-blue-600"></i> 手動增加人員：</span>
+              <input type="text" id="manualEmpId" placeholder="工號 (如 N000143451)" class="px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg uppercase w-36 focus:ring-1 focus:ring-blue-500 focus:outline-none">
+              <input type="text" id="manualEmpName" placeholder="姓名 (選填)" class="px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg w-28 focus:ring-1 focus:ring-blue-500 focus:outline-none">
+              <button type="button" onclick="addManualEmployee()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg shadow-sm transition">
+                加入名單
+              </button>
             </div>
           </div>
 
@@ -210,15 +242,14 @@
 
   <!-- 系統腳本 -->
   <script>
-    // ==========================================
-    // 核心端點與狀態設定
-    // ==========================================
     const GAS_URL = "https://script.google.com/macros/s/AKfycbxC1Ax0lGsrT0NjwZlt1JSAxitjutoDKbpWJ28sGgjeuyCBzjwHjk2YaI_pHHGpFSPT/exec";
     
     let currentAdmin = null;
     let cachedDepartments = [];
+    // 當前挑選出的應訓人員物件陣列 [{id: "...", name: "...", dept: "..."}]
+    let selectedRosterList = [];
 
-    // 寬裕的逾時請求封裝（改為 30 秒，避免冷啟動中斷）
+    // 寬裕的逾時請求封裝（30 秒防中斷）
     function fetchWithTimeout(url, options, timeout = 30000) {
       return Promise.race([
         fetch(url, options),
@@ -295,6 +326,7 @@
       document.getElementById('dashboardSection').classList.add('hidden');
       document.getElementById('adminHeaderInfo').classList.add('hidden');
       document.getElementById('adminIdInput').value = '';
+      selectedRosterList = [];
     }
 
     // 分頁切換
@@ -328,7 +360,7 @@
           cachedDepartments = json.departments;
           container.innerHTML = json.departments.map(dept => `
             <label class="flex items-center space-x-2 text-slate-700 select-none cursor-pointer">
-              <input type="checkbox" name="selectedDepts" value="${dept}" class="rounded border-slate-300 text-blue-600 focus:ring-blue-500">
+              <input type="checkbox" name="selectedDepts" value="${dept}" onchange="handleDeptChange()" class="rounded border-slate-300 text-blue-600 focus:ring-blue-500">
               <span>${dept}</span>
             </label>
           `).join('');
@@ -336,6 +368,94 @@
       } catch (err) {
         container.innerHTML = '<span class="text-xs text-red-500">部門載入失敗，請重新整理</span>';
       }
+    }
+
+    // 全選/清空部門
+    function selectAllDepts(checked) {
+      const cbs = document.querySelectorAll('input[name="selectedDepts"]');
+      cbs.forEach(cb => cb.checked = checked);
+      handleDeptChange();
+    }
+
+    // 當部門勾選變更時，自動重新載入名冊
+    async function handleDeptChange() {
+      const deptCheckboxes = document.querySelectorAll('input[name="selectedDepts"]:checked');
+      const selectedDepts = Array.from(deptCheckboxes).map(cb => cb.value);
+
+      if (selectedDepts.length === 0) {
+        selectedRosterList = [];
+        renderRosterTags();
+        return;
+      }
+
+      const container = document.getElementById('selectedRosterContainer');
+      container.innerHTML = '<span class="text-xs text-blue-500 flex items-center gap-1.5"><i class="fa-solid fa-spinner fa-spin"></i> 正在撈取部門人員名冊...</span>';
+
+      try {
+        const rosterRes = await fetch(`${GAS_URL}?action=getRosterByDept&depts=${encodeURIComponent(selectedDepts.join(','))}`);
+        const rosterJson = await rosterRes.json();
+        selectedRosterList = rosterJson.roster || [];
+        renderRosterTags();
+      } catch (e) {
+        container.innerHTML = '<span class="text-xs text-red-500">撈取名冊失敗</span>';
+      }
+    }
+
+    // 渲染人員標籤清單
+    function renderRosterTags() {
+      const container = document.getElementById('selectedRosterContainer');
+      const badge = document.getElementById('rosterCountBadge');
+      badge.textContent = `${selectedRosterList.length} 人`;
+
+      if (selectedRosterList.length === 0) {
+        container.innerHTML = '<span class="text-xs text-slate-400 italic">尚未選取任何部門或名單為空...</span>';
+        return;
+      }
+
+      container.innerHTML = selectedRosterList.map((emp, index) => `
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-800 border border-blue-200">
+          <span>${emp.name} <span class="text-[10px] text-blue-500">(${emp.id})</span></span>
+          <button type="button" onclick="removeEmployeeByIndex(${index})" class="text-blue-400 hover:text-red-500 focus:outline-none ml-0.5" title="刪除此同仁">
+            <i class="fa-solid fa-circle-xmark"></i>
+          </button>
+        </span>
+      `).join('');
+    }
+
+    // 人工刪減單筆人員
+    function removeEmployeeByIndex(index) {
+      selectedRosterList.splice(index, 1);
+      renderRosterTags();
+    }
+
+    // 人工手動增加單筆人員
+    function addManualEmployee() {
+      const idInput = document.getElementById('manualEmpId');
+      const nameInput = document.getElementById('manualEmpName');
+      const empId = idInput.value.trim().toUpperCase();
+      const empName = nameInput.value.trim();
+
+      if (!empId) {
+        alert('請輸入員工工號！');
+        return;
+      }
+
+      // 檢查是否已在名單中
+      const exists = selectedRosterList.some(e => e.id.toUpperCase() === empId);
+      if (exists) {
+        alert(`工號 ${empId} 已在名單中！`);
+        return;
+      }
+
+      selectedRosterList.push({
+        id: empId,
+        name: empName || empId,
+        dept: "手動指定"
+      });
+
+      idInput.value = '';
+      nameInput.value = '';
+      renderRosterTags();
     }
 
     // 發布新課程
@@ -347,12 +467,11 @@
       const content = document.getElementById('courseContent').value.trim();
       const imageFiles = document.getElementById('courseImages').files;
 
-      // 取得勾選的部門
       const deptCheckboxes = document.querySelectorAll('input[name="selectedDepts"]:checked');
       const selectedDepts = Array.from(deptCheckboxes).map(cb => cb.value);
 
-      if (selectedDepts.length === 0) {
-        alert('請至少勾選一個應訓部門！');
+      if (selectedRosterList.length === 0) {
+        alert('目前應訓人員名冊為空！請至少勾選一個部門或手動新增人員。');
         return;
       }
 
@@ -360,12 +479,7 @@
       submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 建立活頁簿與推播 LINE 中...';
 
       try {
-        // 1. 撈取受訓人員名冊
-        const rosterRes = await fetch(`${GAS_URL}?action=getRosterByDept&depts=${encodeURIComponent(selectedDepts.join(','))}`);
-        const rosterJson = await rosterRes.json();
-        const roster = rosterJson.roster || [];
-
-        // 2. 轉換圖片為 Base64
+        // 1. 圖片轉換為 Base64
         const imagePayload = [];
         for (let i = 0; i < Math.min(imageFiles.length, 4); i++) {
           const file = imageFiles[i];
@@ -373,10 +487,10 @@
           imagePayload.push({ base64: b64, note: file.name });
         }
 
-        // 3. 產生課程編號
+        // 2. 產生課程編號
         const courseId = 'C' + new Date().toISOString().slice(2, 10).replace(/-/g, '') + '_' + Math.floor(100 + Math.random() * 900);
 
-        // 4. 發送建立課程請求
+        // 3. 發送建立課程請求（直接送出經人工篩選過後的 selectedRosterList）
         const postData = {
           action: "createCourseBook",
           courseId: courseId,
@@ -386,7 +500,7 @@
           creatorId: currentAdmin.id,
           content: content,
           selectedDepts: selectedDepts,
-          roster: roster,
+          roster: selectedRosterList,
           images: imagePayload
         };
 
@@ -399,6 +513,8 @@
         if (createJson.status === 'success') {
           alert('✅ 課程建立成功！已同步發送 LINE 提醒予應訓同仁。');
           document.getElementById('createCourseForm').reset();
+          selectedRosterList = [];
+          renderRosterTags();
           switchTab('list');
         } else {
           alert('建立失敗：' + (createJson.message || '未知錯誤'));
@@ -458,7 +574,7 @@
       }
     }
 
-    // 查詢未簽名清單
+    // 查詢未簽核人員清單
     async function viewUnsignedList(fileId) {
       const modal = document.getElementById('unsignedModal');
       const body = document.getElementById('unsignedListBody');
