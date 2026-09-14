@@ -21,7 +21,7 @@
 <body class="bg-slate-100 min-h-screen p-3 md:p-6 flex justify-center items-start font-sans">
 
   <div class="w-full max-w-md my-2 space-y-4">
-    
+
     <!-- 1. 學員登入視窗 -->
     <div id="studentLoginBox" class="bg-white rounded-2xl shadow-md p-6 text-center space-y-5">
       <div class="space-y-1">
@@ -40,7 +40,7 @@
 
     <!-- 2. 學員待辦儀表板 -->
     <div id="studentPortal" class="hidden space-y-4">
-      
+
       <!-- 個人頂部狀態列 -->
       <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex justify-between items-center">
         <div>
@@ -72,7 +72,7 @@
 
     <!-- 3. 單一課程簽核視窗 -->
     <div id="signModalView" class="hidden bg-white rounded-2xl shadow-xl p-5 space-y-5 border border-slate-200">
-      
+
       <div class="flex justify-between items-center border-b pb-3">
         <span class="text-xs bg-blue-100 text-blue-800 font-bold px-2.5 py-1 rounded-full" id="detailCategory">宣導/告知/訓練</span>
         <button onclick="closeSignModalView()" class="text-xs text-slate-400 hover:text-slate-600 font-bold">✕ 返回清單</button>
@@ -159,11 +159,33 @@
   <script>
     const GAS_URL = "https://script.google.com/macros/s/AKfycbxC1Ax0lGsrT0NjwZlt1JSAxitjutoDKbpWJ28sGgjeuyCBzjwHjk2YaI_pHHGpFSPT/exec";
     const STUDENT_SESSION_KEY = "trainingPlatformStudentId";
+    const STUDENT_PENDING_CACHE_PREFIX = "trainingPlatformPending:";
+    const STUDENT_PENDING_CACHE_TTL = 5 * 60 * 1000;
 
     let currentStudent = null;
     let activeCourseFileId = null;
     let savedSignatureBase64 = "";
     let currentPendingCourses = [];
+
+    function getCachedStudentPending(empId) {
+      try {
+        const cached = JSON.parse(localStorage.getItem(STUDENT_PENDING_CACHE_PREFIX + empId));
+        if (!cached || !cached.savedAt || Date.now() - cached.savedAt > STUDENT_PENDING_CACHE_TTL) return null;
+        return cached.value;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function cacheStudentPending(data) {
+      if (!data || !data.empId) return;
+      try {
+        localStorage.setItem(STUDENT_PENDING_CACHE_PREFIX + data.empId, JSON.stringify({
+          savedAt: Date.now(),
+          value: { pendingCourses: Array.isArray(data.pendingCourses) ? data.pendingCourses : [] }
+        }));
+      } catch (e) {}
+    }
 
     function openStudentPortal(data) {
       currentStudent = { empId: data.empId, name: data.name };
@@ -171,7 +193,11 @@
       document.getElementById("displayEmpId").innerText = currentStudent.empId;
       document.getElementById("studentLoginBox").classList.add("hidden");
       document.getElementById("studentPortal").classList.remove("hidden");
-      renderPendingList(data.pendingCourses || []);
+      if (Array.isArray(data.pendingCourses)) {
+        renderPendingList(data.pendingCourses);
+      } else {
+        document.getElementById("pendingListContainer").innerHTML = '<div class="text-center py-6 text-slate-400 text-xs">正在同步最新待簽課程...</div>';
+      }
     }
 
     async function handleStudentLogin() {
@@ -189,6 +215,7 @@
           // 只輸出到瀏覽器主控台，便於確認目前 /exec 是否已部署新版，以及哪一筆課程被略過。
           console.info("待簽課程診斷", data.debugLogs || []);
           localStorage.setItem(STUDENT_SESSION_KEY, JSON.stringify({ empId: data.empId, name: data.name }));
+          cacheStudentPending(data);
           openStudentPortal(data);
         } else {
           localStorage.removeItem(STUDENT_SESSION_KEY);
@@ -203,6 +230,7 @@
     }
 
     function logoutStudent() {
+      if (currentStudent && currentStudent.empId) localStorage.removeItem(STUDENT_PENDING_CACHE_PREFIX + currentStudent.empId);
       currentStudent = null;
       localStorage.removeItem(STUDENT_SESSION_KEY);
       document.getElementById("studentPortal").classList.add("hidden");
@@ -219,7 +247,12 @@
         const savedStudent = JSON.parse(savedSession);
         if (!savedStudent || !savedStudent.empId || !savedStudent.name) throw new Error("舊版登入記憶");
         document.getElementById("loginEmpId").value = savedStudent.empId;
-        openStudentPortal({ empId: savedStudent.empId, name: savedStudent.name, pendingCourses: [] });
+        const cachedPending = getCachedStudentPending(savedStudent.empId);
+        openStudentPortal({
+          empId: savedStudent.empId,
+          name: savedStudent.name,
+          pendingCourses: cachedPending ? cachedPending.pendingCourses : undefined
+        });
         refreshStudentPending();
       } catch (err) {
         // 舊版只記錄工號時，保留在輸入框讓使用者登入一次以升級為完整登入狀態。
@@ -318,6 +351,7 @@
         });
         const data = await res.json();
         if (data.status === "success") {
+          cacheStudentPending(data);
           renderPendingList(data.pendingCourses);
         } else {
           // 若舊瀏覽器記憶的是不在公司名冊的工號，立即清除登入狀態。
@@ -329,6 +363,9 @@
 
     function removeCompletedCourseFromView(fileId) {
       renderPendingList(currentPendingCourses.filter(course => course.fileId !== fileId));
+      if (currentStudent) {
+        cacheStudentPending({ empId: currentStudent.empId, pendingCourses: currentPendingCourses });
+      }
     }
 
     function openLightbox(url) {
