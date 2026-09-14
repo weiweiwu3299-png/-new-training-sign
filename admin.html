@@ -256,7 +256,8 @@
       localStorage.removeItem(ADMIN_CACHE_PREFIX + key);
     }
 
-    async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+    // Apps Script 新部署或閒置後的第一次呼叫可能較慢；30 秒可避免正常冷啟動被誤判逾時。
+    async function fetchWithTimeout(url, options = {}, timeoutMs = 30000) {
       const controller = new AbortController();
       const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
       try {
@@ -302,7 +303,7 @@
         }
       } catch (err) {
         if (err.name === "AbortError") {
-          alert("驗證逾時（15 秒）。請檢查 Apps Script 部署與 Google 試算表權限後再試。");
+          alert("驗證逾時（30 秒）。請確認 Apps Script 部署已完成，稍後再試一次。");
         } else {
           alert("連線異常，請確認網路！");
         }
