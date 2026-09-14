@@ -581,19 +581,34 @@
 
       try {
         const res = await fetch(`${GAS_URL}?action=exportPdf&fileId=${currentCourse.fileId}`);
-        const data = await res.json();
+        const rawText = await res.text();
+        let data;
+        try {
+          data = JSON.parse(rawText);
+        } catch (parseError) {
+          throw new Error(`伺服器回傳格式異常（HTTP ${res.status}）：${rawText.slice(0, 180)}`);
+        }
         if (data.status === "success") {
+          if (!data.pdfDataUri || data.pdfDataUri.indexOf(",") === -1) {
+            throw new Error("伺服器未回傳可下載的 PDF 資料");
+          }
+          const base64 = data.pdfDataUri.split(",", 2)[1];
+          const binary = atob(base64);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+          const pdfUrl = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
           const dl = document.createElement("a");
-          dl.href = data.pdfDataUri;
+          dl.href = pdfUrl;
           dl.download = data.fileName || "簽核表.pdf";
           document.body.appendChild(dl);
           dl.click();
           document.body.removeChild(dl);
+          setTimeout(() => URL.revokeObjectURL(pdfUrl), 30000);
         } else {
-          alert("產出失敗：" + data.message);
+          alert("產出失敗：" + (data.message || "後端未提供原因"));
         }
       } catch (e) {
-        alert("匯出 PDF 異常！");
+        alert("匯出 PDF 異常：" + (e && e.message ? e.message : String(e)));
       } finally {
         btn.disabled = false;
         btn.innerText = "匯出結案簽名表 PDF";
