@@ -166,6 +166,35 @@
     let activeCourseFileId = null;
     let savedSignatureBase64 = "";
     let currentPendingCourses = [];
+    const courseDetailCache = new Map();
+
+    async function fetchWithTimeout(url, options = {}, timeoutMs = 45000) {
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        return await fetch(url, { ...options, signal: controller.signal });
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
+    }
+
+    async function fetchJsonWithRetry(url, options = {}, timeoutMs = 45000, retries = 1) {
+      let lastError;
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+          const response = await fetchWithTimeout(url, options, timeoutMs);
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const data = await response.json();
+          if (data && data.temporary && attempt < retries) throw new Error(data.message || "資料暫時同步中");
+          return data;
+        } catch (error) {
+          lastError = error;
+          if (attempt >= retries) break;
+          await new Promise(resolve => window.setTimeout(resolve, 600 * (attempt + 1)));
+        }
+      }
+      throw lastError;
+    }
 
     function getCachedStudentPending(empId) {
       try {
@@ -209,14 +238,15 @@
       btn.innerText = "查詢待辦中...";
 
       try {
-        const res = await fetch(`${GAS_URL}?action=getStudentPendingCourses&empId=${encodeURIComponent(empId)}`);
-        const data = await res.json();
+        const data = await fetchJsonWithRetry(`${GAS_URL}?action=getStudentPendingCourses&empId=${encodeURIComponent(empId)}`, {}, 60000, 1);
         if (data.status === "success") {
           // 只輸出到瀏覽器主控台，便於確認目前 /exec 是否已部署新版，以及哪一筆課程被略過。
           console.info("待簽課程診斷", data.debugLogs || []);
           localStorage.setItem(STUDENT_SESSION_KEY, JSON.stringify({ empId: data.empId, name: data.name }));
           cacheStudentPending(data);
           openStudentPortal(data);
+        } else if (data.temporary) {
+          alert(data.message || "課程資料正在同步，請稍後再試一次。");
         } else {
           localStorage.removeItem(STUDENT_SESSION_KEY);
           alert("查無此工號或連線異常！");
@@ -232,6 +262,7 @@
     function logoutStudent() {
       if (currentStudent && currentStudent.empId) localStorage.removeItem(STUDENT_PENDING_CACHE_PREFIX + currentStudent.empId);
       currentStudent = null;
+      courseDetailCache.clear();
       localStorage.removeItem(STUDENT_SESSION_KEY);
       document.getElementById("studentPortal").classList.add("hidden");
       document.getElementById("signModalView").classList.add("hidden");
@@ -303,37 +334,48 @@
       document.getElementById("signerDisplay").innerText = `[${currentStudent.empId}] ${currentStudent.name}`;
       document.getElementById("detailTitle").innerText = "載入訓練內容中...";
       document.getElementById("detailContent").innerText = "正在從雲端載入重點條目...";
+      document.getElementById("detailImageGallery").classList.add("hidden");
+      document.getElementById("detailImageList").innerHTML = "";
 
       resetSignatureForCourse();
 
-      try {
-        const res = await fetch(`${GAS_URL}?action=getCourseDetail&fileId=${fileId}`);
-        const data = await res.json();
-        if (data.status === "success") {
-          document.getElementById("detailTitle").innerText = data.info.title;
-          document.getElementById("detailCategory").innerText = data.info.category;
-          document.getElementById("detailContent").innerText = data.info.content;
+      if (courseDetailCache.has(fileId)) {
+        renderCourseDetail(courseDetailCache.get(fileId));
+        return;
+      }
 
-          const gal = document.getElementById("detailImageGallery");
-          const list = document.getElementById("detailImageList");
-          if (data.info.images && data.info.images.length > 0) {
-            gal.classList.remove("hidden");
-            list.innerHTML = "";
-            data.info.images.forEach(img => {
-              const item = document.createElement("div");
-              item.className = "border rounded-xl overflow-hidden bg-slate-50";
-              item.innerHTML = `
-                <img src="${img.url}" class="w-full h-auto max-h-96 object-contain bg-white cursor-pointer" onclick="openLightbox('${img.url}')" />
-                ${img.note ? `<p class="p-2 text-xs text-slate-700 bg-slate-50 border-t">${img.note}</p>` : ''}
-              `;
-              list.appendChild(item);
-            });
-          } else {
-            gal.classList.add("hidden");
-          }
+      try {
+        const data = await fetchJsonWithRetry(`${GAS_URL}?action=getCourseDetail&fileId=${fileId}`, {}, 45000, 1);
+        if (data.status === "success") {
+          courseDetailCache.set(fileId, data.info);
+          renderCourseDetail(data.info);
         }
       } catch (err) {
         document.getElementById("detailContent").innerText = "無法載入課程資訊，請檢查網路連線。";
+      }
+    }
+
+    function renderCourseDetail(info) {
+      document.getElementById("detailTitle").innerText = info.title;
+      document.getElementById("detailCategory").innerText = info.category;
+      document.getElementById("detailContent").innerText = info.content;
+
+      const gal = document.getElementById("detailImageGallery");
+      const list = document.getElementById("detailImageList");
+      list.innerHTML = "";
+      if (info.images && info.images.length > 0) {
+        gal.classList.remove("hidden");
+        info.images.forEach(img => {
+          const item = document.createElement("div");
+          item.className = "border rounded-xl overflow-hidden bg-slate-50";
+          item.innerHTML = `
+            <img src="${img.url}" class="w-full h-auto max-h-96 object-contain bg-white cursor-pointer" onclick="openLightbox('${img.url}')" />
+            ${img.note ? `<p class="p-2 text-xs text-slate-700 bg-slate-50 border-t">${img.note}</p>` : ''}
+          `;
+          list.appendChild(item);
+        });
+      } else {
+        gal.classList.add("hidden");
       }
     }
 
@@ -346,13 +388,14 @@
     async function refreshStudentPending(forceFresh = false) {
       try {
         const freshParam = forceFresh ? `&fresh=1&t=${Date.now()}` : "";
-        const res = await fetch(`${GAS_URL}?action=getStudentPendingCourses&empId=${encodeURIComponent(currentStudent.empId)}${freshParam}`, {
+        const data = await fetchJsonWithRetry(`${GAS_URL}?action=getStudentPendingCourses&empId=${encodeURIComponent(currentStudent.empId)}${freshParam}`, {
           cache: forceFresh ? "no-store" : "default"
-        });
-        const data = await res.json();
+        }, 45000, 1);
         if (data.status === "success") {
           cacheStudentPending(data);
           renderPendingList(data.pendingCourses);
+        } else if (data.temporary) {
+          window.setTimeout(() => refreshStudentPending(true), 3000);
         } else {
           // 若舊瀏覽器記憶的是不在公司名冊的工號，立即清除登入狀態。
           logoutStudent();
@@ -466,12 +509,12 @@
       };
 
       try {
-        await fetch(GAS_URL, {
+        await fetchWithTimeout(GAS_URL, {
           method: "POST",
           mode: "no-cors",
           headers: { "Content-Type": "text/plain;charset=utf-8" },
           body: JSON.stringify(payload)
-        });
+        }, 90000);
 
         const completedFileId = activeCourseFileId;
         removeCompletedCourseFromView(completedFileId);
