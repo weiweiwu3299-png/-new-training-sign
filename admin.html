@@ -268,6 +268,24 @@
       }
     }
 
+    async function fetchJsonWithRetry(url, options = {}, timeoutMs = 30000, retries = 1) {
+      let lastError;
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+          const response = await fetchWithTimeout(url, options, timeoutMs);
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const data = await response.json();
+          if (data && data.temporary && attempt < retries) throw new Error(data.message || "資料暫時同步中");
+          return data;
+        } catch (error) {
+          lastError = error;
+          if (attempt >= retries) break;
+          await new Promise(resolve => window.setTimeout(resolve, 500 * (attempt + 1)));
+        }
+      }
+      throw lastError;
+    }
+
     function openAdminDashboard(admin) {
       currentAdmin = admin;
       myCourses = [];
@@ -294,8 +312,7 @@
       btn.innerText = "驗證中...";
 
       try {
-        const res = await fetchWithTimeout(`${GAS_URL}?action=adminLogin&adminId=${encodeURIComponent(id)}`);
-        const data = await res.json();
+        const data = await fetchJsonWithRetry(`${GAS_URL}?action=adminLogin&adminId=${encodeURIComponent(id)}`, {}, 90000, 1);
         if (data.status === "success") {
           localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(data.admin));
           openAdminDashboard(data.admin);
@@ -442,8 +459,7 @@
       }
 
       try {
-        const res = await fetch(`${GAS_URL}?action=getMyCourses&creatorId=${encodeURIComponent(currentAdmin.id)}`);
-        const data = await res.json();
+        const data = await fetchJsonWithRetry(`${GAS_URL}?action=getMyCourses&creatorId=${encodeURIComponent(currentAdmin.id)}`, {}, 30000, 1);
         if (data.status === "success") {
           myCourses = Array.isArray(data.list) ? data.list : [];
           writeLocalCache(cacheKey, myCourses);
@@ -513,7 +529,7 @@
       renderCourseDashboardStatus();
 
       try {
-        const res = await fetch(GAS_URL, {
+        const data = await fetchJsonWithRetry(GAS_URL, {
           method: "POST",
           headers: { "Content-Type": "text/plain;charset=utf-8" },
           body: JSON.stringify({
@@ -521,8 +537,7 @@
             courseId: courseId,
             newStatus: targetStatus
           })
-        });
-        const data = await res.json();
+        }, 90000, 0);
         if (data.status === "success") {
           // 畫面已先完成更新；背景資料以伺服器成功回覆為準，不再重讀名冊。
         } else {
@@ -547,7 +562,7 @@
       if (!confirm(warning)) return;
 
       try {
-        const res = await fetch(GAS_URL, {
+        const data = await fetchJsonWithRetry(GAS_URL, {
           method: "POST",
           headers: { "Content-Type": "text/plain;charset=utf-8" },
           body: JSON.stringify({
@@ -556,8 +571,7 @@
             fileId: currentCourse.fileId,
             adminId: currentAdmin.id
           })
-        });
-        const data = await res.json();
+        }, 90000, 0);
         if (data.status === "success") {
           alert("課程已自平台移除，課程試算表已移至 Google Drive 垃圾桶。");
           myCourses = myCourses.filter(course => course.courseId !== currentCourse.courseId);
@@ -581,7 +595,8 @@
       btn.innerText = "產出 PDF 中...";
 
       try {
-        const res = await fetch(`${GAS_URL}?action=exportPdf&fileId=${currentCourse.fileId}`);
+        const res = await fetchWithTimeout(`${GAS_URL}?action=exportPdf&fileId=${currentCourse.fileId}`, {}, 120000);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const rawText = await res.text();
         let data;
         try {
@@ -619,8 +634,7 @@
     async function checkActiveUnsigned() {
       if (!currentCourse) return;
       try {
-        const res = await fetch(`${GAS_URL}?action=getUnsignedList&fileId=${currentCourse.fileId}`);
-        const data = await res.json();
+        const data = await fetchJsonWithRetry(`${GAS_URL}?action=getUnsignedList&fileId=${currentCourse.fileId}`, {}, 30000, 1);
         if (data.status === "success") {
           const box = document.getElementById("activeUnsignedBox");
           const list = document.getElementById("activeUnsignedList");
@@ -650,8 +664,7 @@
 
       container.innerHTML = '<span class="text-xs text-slate-400">載入名冊中...</span>';
       try {
-        const res = await fetch(`${GAS_URL}?action=getCourseRoster&fileId=${fileId}`);
-        const data = await res.json();
+        const data = await fetchJsonWithRetry(`${GAS_URL}?action=getCourseRoster&fileId=${fileId}`, {}, 30000, 1);
         if (data.status === "success") {
           liveRosterData = Array.isArray(data.roster) ? data.roster : [];
           courseRosterCache.set(fileId, { savedAt: Date.now(), roster: liveRosterData.map(person => ({ ...person })) });
@@ -701,7 +714,7 @@
       btn.disabled = true;
       btn.innerText = "儲存中...";
       try {
-        const res = await fetch(GAS_URL, {
+        const data = await fetchJsonWithRetry(GAS_URL, {
           method: "POST",
           headers: { "Content-Type": "text/plain;charset=utf-8" },
           body: JSON.stringify({
@@ -709,8 +722,7 @@
             fileId: currentCourse.fileId,
             roster: liveRosterData
           })
-        });
-        const data = await res.json();
+        }, 90000, 0);
         if (data.status === "success") {
           courseRosterCache.set(currentCourse.fileId, { savedAt: Date.now(), roster: liveRosterData.map(person => ({ ...person })) });
           alert(`名冊更新成功！已同步 ${data.count} 位應上課人員。`);
@@ -730,8 +742,7 @@
         renderDepartmentCheckboxes(cached);
       }
       try {
-        const res = await fetch(`${GAS_URL}?action=getDepartmentList`);
-        const data = await res.json();
+        const data = await fetchJsonWithRetry(`${GAS_URL}?action=getDepartmentList`, {}, 30000, 1);
         if (data.status === "success" && data.departments.length > 0) {
           writeLocalCache("departments", data.departments);
           // 使用者已開始勾選時，避免背景更新重置他的選擇。
@@ -784,8 +795,7 @@
         if (cached && Date.now() - cached.savedAt < ADMIN_CACHE_TTL) {
           data = { status: "success", roster: cached.roster.map(person => ({ ...person })) };
         } else {
-          const res = await fetch(`${GAS_URL}?action=getRosterByDept&depts=${encodeURIComponent(selectedDepts.join(","))}`);
-          data = await res.json();
+          data = await fetchJsonWithRetry(`${GAS_URL}?action=getRosterByDept&depts=${encodeURIComponent(selectedDepts.join(","))}`, {}, 30000, 1);
           if (data.status === "success") {
             departmentRosterCache.set(cacheKey, { savedAt: Date.now(), roster: (data.roster || []).map(person => ({ ...person })) });
           }
@@ -923,13 +933,29 @@
       };
 
       try {
-        const res = await fetch(GAS_URL, {
+        const result = await fetchJsonWithRetry(GAS_URL, {
           method: "POST",
           headers: { "Content-Type": "text/plain;charset=utf-8" },
           body: JSON.stringify(payload)
-        });
-        const result = await res.json();
+        }, 120000, 0);
         if (result.status === "success") {
+          const lineRecipientIds = Array.isArray(result.lineRecipientIds) ? result.lineRecipientIds : activeRoster.map(person => person.id);
+          if (lineRecipientIds.length > 0) {
+            fetch(GAS_URL, {
+              method: "POST",
+              mode: "no-cors",
+              keepalive: true,
+              headers: { "Content-Type": "text/plain;charset=utf-8" },
+              body: JSON.stringify({
+                action: "notifyCourseLine",
+                adminId: currentAdmin.id,
+                empIdList: lineRecipientIds,
+                title: payload.title,
+                category: payload.category,
+                creator: payload.creator
+              })
+            }).catch(error => console.warn("LINE 背景通知未送達", error));
+          }
           alert("課程建立成功！已同步至學員待辦清單，並已執行 LINE 通知處理。");
           toggleCreateForm();
           clearLocalCache(`courses:${currentAdmin.id}`);
