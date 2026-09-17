@@ -137,7 +137,6 @@
             <button type="button" onclick="loadCourseDraft()" class="px-4 py-2 bg-slate-100 rounded-lg text-sm">編輯選取草稿</button>
             <button type="button" onclick="deleteCourseDraft()" class="px-4 py-2 bg-red-50 text-red-600 rounded-lg text-sm">刪除選取草稿</button>
             <button type="button" onclick="newCourseDraft()" class="px-3 py-2 bg-slate-100 rounded-lg text-sm">新增空白課程</button>
-            <button type="button" onclick="importLocalDraft()" class="px-3 py-2 bg-slate-100 rounded-lg text-sm">讀取舊本機草稿</button>
           </div>
           <p id="draftStatus" class="text-xs text-slate-500">草稿保存於公司雲端，可跨電腦編輯、刪除。只有正式開課後學員才看得到。</p>
           <button type="button" id="publishBtn" onclick="submitCreateCourse()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl transition shadow">
@@ -242,25 +241,6 @@
     let currentDraftSavedAt = null;
     let cloudDraftBusy = false;
 
-    function draftStorage(mode, value) {
-      const key = currentAdmin.id;
-      return new Promise((resolve, reject) => {
-        const request = indexedDB.open("trainingCourseDrafts", 1);
-        request.onupgradeneeded = () => request.result.createObjectStore("drafts");
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => {
-          const db = request.result;
-          const tx = db.transaction("drafts", mode === "get" ? "readonly" : "readwrite");
-          const store = tx.objectStore("drafts");
-          const operation = mode === "get" ? store.get(key) : mode === "delete" ? store.delete(key) : store.put(value, key);
-          let result;
-          operation.onsuccess = () => { result = operation.result; };
-          tx.oncomplete = () => { db.close(); resolve(result); };
-          tx.onabort = tx.onerror = () => { db.close(); reject(tx.error || new Error("草稿儲存失敗")); };
-        };
-      });
-    }
-
     async function saveCourseDraft() {
       if (processingImages || publishingCourse || cloudDraftBusy) return alert("請等待目前操作完成。");
       cloudDraftBusy = true;
@@ -350,17 +330,6 @@
       document.getElementById("draftStatus").innerText = "新課程尚未儲存、尚未發布。";
     }
 
-    async function importLocalDraft() {
-      if (processingImages || publishingCourse || cloudDraftBusy) return alert("請等待目前操作完成。");
-      try {
-        const draft = await draftStorage("get");
-        if (!draft) return alert("沒有舊版本機草稿。");
-        if (!confirm("用舊本機草稿取代目前表單？讀取後請按儲存雲端草稿。")) return;
-        currentDraftId = null; currentDraftSavedAt = null; applyCourseDraft(draft);
-        document.getElementById("cloudDraftSelect").value = "";
-        document.getElementById("draftStatus").innerText = "舊本機草稿已讀取，請按儲存雲端草稿。";
-      } catch (error) { alert("舊本機草稿讀取失敗。"); }
-    }
 
     let currentAdmin = null;
     let uploadedImages = [];
