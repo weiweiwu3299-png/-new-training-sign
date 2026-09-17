@@ -369,7 +369,7 @@
           const item = document.createElement("div");
           item.className = "border rounded-xl overflow-hidden bg-slate-50";
           item.innerHTML = `
-            <img src="${img.url}" class="w-full h-auto max-h-96 object-contain bg-white cursor-pointer" onclick="openLightbox('${img.url}')" />
+            <img loading="lazy" decoding="async" width="1000" height="750" src="${img.url}" class="w-full h-auto max-h-96 object-contain bg-white cursor-pointer" onclick="openLightbox('${img.url}')" />
             ${img.note ? `<p class="p-2 text-xs text-slate-700 bg-slate-50 border-t">${img.note}</p>` : ''}
           `;
           list.appendChild(item);
