@@ -120,18 +120,24 @@
             </div>
           </div>
 
-          <!-- 最多 4 張教材圖片 -->
+          <!-- 最多 20 張教材圖片 -->
           <div class="border rounded-xl p-4 bg-slate-50 space-y-3">
             <div class="flex justify-between items-center">
-              <label class="block text-xs font-bold text-slate-700">🖼️ 教材圖片上傳 (最多 4 張)</label>
-              <span id="imgCountBadge" class="text-xs text-blue-600 font-semibold">0 / 4 張</span>
+              <label class="block text-xs font-bold text-slate-700">🖼️ 教材圖片上傳 (最多 20 張)</label>
+              <span id="imgCountBadge" class="text-xs text-blue-600 font-semibold">0 / 20 張</span>
             </div>
             <input type="file" id="imageUploader" accept="image/*" multiple class="text-xs text-slate-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:bg-blue-50 file:text-blue-700">
             <div id="imagePreviewGrid" class="grid grid-cols-2 md:grid-cols-4 gap-3 pt-1"></div>
           </div>
 
+          <div class="flex flex-wrap gap-2">
+            <button type="button" onclick="saveCourseDraft()" class="px-4 py-2 bg-slate-100 rounded-lg text-sm">暫存草稿</button>
+            <button type="button" onclick="loadCourseDraft()" class="px-4 py-2 bg-slate-100 rounded-lg text-sm">讀取草稿</button>
+            <button type="button" onclick="deleteCourseDraft()" class="px-4 py-2 bg-red-50 text-red-600 rounded-lg text-sm">刪除草稿</button>
+          </div>
+          <p id="draftStatus" class="text-xs text-slate-500">草稿包含照片，僅保存於此瀏覽器、此經辦工號；不會發布。每個工號保留一份草稿。</p>
           <button type="button" id="publishBtn" onclick="submitCreateCourse()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl transition shadow">
-            確認建立課程並發布至學員待辦（自動執行 LINE 通知）
+            確認建立課程並發布至學員待辦
           </button>
         </form>
       </div>
@@ -224,6 +230,65 @@
     const ADMIN_SESSION_KEY = "trainingPlatformAdminId";
     const ADMIN_CACHE_PREFIX = "trainingPlatformAdminCache:";
     const ADMIN_CACHE_TTL = 5 * 60 * 1000;
+    const MAX_COURSE_IMAGES = 20;
+    let processingImages = false;
+    let publishingCourse = false;
+    let draftSelectedDepts = null;
+
+    function draftStorage(mode, value) {
+      const key = currentAdmin.id;
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open("trainingCourseDrafts", 1);
+        request.onupgradeneeded = () => request.result.createObjectStore("drafts");
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const db = request.result;
+          const tx = db.transaction("drafts", mode === "get" ? "readonly" : "readwrite");
+          const store = tx.objectStore("drafts");
+          const operation = mode === "get" ? store.get(key) : mode === "delete" ? store.delete(key) : store.put(value, key);
+          let result;
+          operation.onsuccess = () => { result = operation.result; };
+          tx.oncomplete = () => { db.close(); resolve(result); };
+          tx.onabort = tx.onerror = () => { db.close(); reject(tx.error || new Error("草稿儲存失敗")); };
+        };
+      });
+    }
+
+    async function saveCourseDraft() {
+      if (processingImages) return alert("照片正在處理，請完成後再暫存。");
+      try {
+        const draft = { savedAt: Date.now(), fields: {}, roster: activeRoster, images: uploadedImages,
+          depts: Array.from(document.querySelectorAll(".dept-box:checked"), box => box.value) };
+        ["category", "courseId", "title", "content"].forEach(id => draft.fields[id] = document.getElementById(id).value);
+        await draftStorage("put", draft);
+        document.getElementById("draftStatus").innerText = "草稿已暫存：" + new Date(draft.savedAt).toLocaleString();
+      } catch (error) { alert("暫存失敗，請確認瀏覽器儲存空間與權限。原表單仍保留。"); }
+    }
+
+    async function loadCourseDraft() {
+      if (processingImages || publishingCourse) return alert("請等待照片處理或課程發布完成。");
+      try {
+        const draft = await draftStorage("get");
+        if (!draft) return alert("此工號尚無暫存草稿。");
+        if (!confirm("讀取草稿將取代目前尚未發布的表單，確定讀取？")) return;
+        window.clearTimeout(departmentRosterTimer);
+        departmentRosterRequestVersion++;
+        ["category", "courseId", "title", "content"].forEach(id => document.getElementById(id).value = draft.fields[id] || "");
+        activeRoster = draft.roster || [];
+        uploadedImages = (draft.images || []).slice(0, MAX_COURSE_IMAGES);
+        draftSelectedDepts = new Set(draft.depts || []);
+        departmentHasSelection = true;
+        document.querySelectorAll(".dept-box").forEach(box => box.checked = draftSelectedDepts.has(box.value));
+        renderRosterChips(); renderImagePreviews();
+        document.getElementById("draftStatus").innerText = "已讀取草稿：" + new Date(draft.savedAt).toLocaleString();
+      } catch (error) { alert("無法讀取草稿，請確認瀏覽器儲存權限。"); }
+    }
+
+    async function deleteCourseDraft() {
+      if (!confirm("僅刪除此工號在本瀏覽器的草稿，正式課程與目前表單不受影響，確定？")) return;
+      try { await draftStorage("delete"); document.getElementById("draftStatus").innerText = "草稿已刪除，目前表單仍保留。"; }
+      catch (error) { alert("草稿刪除失敗。"); }
+    }
 
     let currentAdmin = null;
     let uploadedImages = [];
@@ -232,6 +297,7 @@
     let liveRosterData = [];
     let myCourses = [];
     let departmentRosterTimer = null;
+    let departmentRosterRequestVersion = 0;
     let departmentHasSelection = false;
     const courseRosterCache = new Map();
     const departmentRosterCache = new Map();
@@ -293,6 +359,8 @@
       liveRosterData = [];
       currentCourse = null;
       departmentHasSelection = false;
+      draftSelectedDepts = null;
+      departmentRosterRequestVersion++;
       courseRosterCache.clear();
       document.getElementById("currentAdminName").innerText = currentAdmin.name;
       document.getElementById("currentAdminId").innerText = currentAdmin.id;
@@ -595,7 +663,7 @@
       btn.innerText = "產出 PDF 中...";
 
       try {
-        const res = await fetchWithTimeout(`${GAS_URL}?action=exportPdf&fileId=${currentCourse.fileId}`, {}, 120000);
+        const res = await fetchWithTimeout(`${GAS_URL}?action=exportPdf&fileId=${currentCourse.fileId}`, {}, 300000);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const rawText = await res.text();
         let data;
@@ -746,7 +814,7 @@
         if (data.status === "success" && data.departments.length > 0) {
           writeLocalCache("departments", data.departments);
           // 使用者已開始勾選時，避免背景更新重置他的選擇。
-          if (!departmentHasSelection) renderDepartmentCheckboxes(data.departments);
+          if (!departmentHasSelection || !container.querySelector(".dept-box")) renderDepartmentCheckboxes(data.departments);
         }
       } catch (err) {
         if (!cached) container.innerHTML = '<span class="text-xs text-red-500">讀取部門失敗</span>';
@@ -764,6 +832,7 @@
         const label = document.createElement("label");
         label.className = "inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-white px-2 py-1 rounded border cursor-pointer";
         label.innerHTML = `<input type="checkbox" name="deptChoice" value="${dept}" onchange="onDeptChanged()" class="dept-box rounded"> ${dept}`;
+        if (draftSelectedDepts) label.querySelector("input").checked = draftSelectedDepts.has(dept);
         container.appendChild(label);
       });
     }
@@ -776,11 +845,13 @@
 
     function onDeptChanged() {
       departmentHasSelection = true;
+      departmentRosterRequestVersion++;
       window.clearTimeout(departmentRosterTimer);
       departmentRosterTimer = window.setTimeout(loadRosterForSelectedDepartments, 350);
     }
 
     async function loadRosterForSelectedDepartments() {
+      const requestVersion = departmentRosterRequestVersion;
       const boxes = Array.from(document.querySelectorAll(".dept-box:checked"));
       const selectedDepts = boxes.map(b => b.value);
       if (selectedDepts.length === 0) {
@@ -800,6 +871,7 @@
             departmentRosterCache.set(cacheKey, { savedAt: Date.now(), roster: (data.roster || []).map(person => ({ ...person })) });
           }
         }
+        if (requestVersion !== departmentRosterRequestVersion) return;
         if (data.status === "success") {
           const manualUsers = activeRoster.filter(r => r.isManual);
           const deptUsers = data.roster;
@@ -853,22 +925,28 @@
       closeManualAddModal();
     }
 
-    function compressImage(file, maxWidth = 600, quality = 0.45) {
-      return new Promise((resolve) => {
+    function compressImage(file, maxWidth = 1000, quality = 0.65) {
+      return new Promise((resolve, reject) => {
         const reader = new FileReader();
+        reader.onerror = () => reject(new Error("照片讀取失敗"));
         reader.onload = (e) => {
           const img = new Image();
+          img.onerror = () => reject(new Error("不支援的圖片格式"));
           img.onload = () => {
             const canvas = document.createElement("canvas");
             let w = img.width, h = img.height;
-            if (w > maxWidth) {
-              h = Math.round((h * maxWidth) / w);
-              w = maxWidth;
+            if (Math.max(w, h) > maxWidth) {
+              const ratio = maxWidth / Math.max(w, h);
+              w = Math.round(w * ratio); h = Math.round(h * ratio);
             }
             canvas.width = w; canvas.height = h;
             const ctx = canvas.getContext("2d");
             ctx.drawImage(img, 0, 0, w, h);
-            resolve(canvas.toDataURL("image/jpeg", quality));
+            let compressed = canvas.toDataURL("image/jpeg", quality);
+            while (compressed.length > 240000 && quality > 0.35) {
+              quality -= 0.1; compressed = canvas.toDataURL("image/jpeg", quality);
+            }
+            resolve(compressed);
           };
           img.src = e.target.result;
         };
@@ -877,25 +955,37 @@
     }
 
     document.getElementById("imageUploader").addEventListener("change", async function(e) {
+      if (publishingCourse) { e.target.value = ""; return alert("課程發布中，請完成後再加入照片。"); }
       const files = Array.from(e.target.files);
-      if (uploadedImages.length + files.length > 4) return alert("最多只能上傳 4 張！");
-      for (const file of files) {
-        const b64 = await compressImage(file);
-        uploadedImages.push({ base64: b64, note: "" });
+      if (uploadedImages.length + files.length > MAX_COURSE_IMAGES) { e.target.value = ""; return alert("最多只能上傳 20 張！"); }
+      processingImages = true;
+      e.target.disabled = true;
+      document.getElementById("publishBtn").disabled = true;
+      try {
+        for (let i = 0; i < files.length; i++) {
+          document.getElementById("imgCountBadge").innerText = `照片壓縮中 ${i + 1} / ${files.length}`;
+          const b64 = await compressImage(files[i]);
+          uploadedImages.push({ base64: b64, note: "" });
+          await new Promise(resolve => window.setTimeout(resolve, 0));
+        }
+      } catch (error) { alert("部分照片未加入：" + error.message); }
+      finally {
+        processingImages = false; e.target.disabled = false; e.target.value = "";
+        document.getElementById("publishBtn").disabled = false;
+        renderImagePreviews();
       }
-      renderImagePreviews();
     });
 
     function renderImagePreviews() {
       const grid = document.getElementById("imagePreviewGrid");
       grid.innerHTML = "";
-      document.getElementById("imgCountBadge").innerText = `${uploadedImages.length} / 4 張`;
+      document.getElementById("imgCountBadge").innerText = `${uploadedImages.length} / 20 張`;
       uploadedImages.forEach((img, idx) => {
         const card = document.createElement("div");
         card.className = "border rounded-lg p-2 bg-white text-center space-y-1 relative";
         card.innerHTML = `
           <button type="button" onclick="removeImg(${idx})" class="absolute top-1 right-1 bg-red-500 text-white rounded-full w-5 h-5 text-xs">✕</button>
-          <img src="${img.base64}" class="h-20 w-full object-cover rounded" />
+          <img loading="lazy" decoding="async" src="${img.base64}" class="h-20 w-full object-cover rounded" />
           <input type="text" placeholder="圖片註釋" value="${img.note}" onchange="uploadedImages[${idx}].note=this.value" class="w-full text-xs border rounded p-1" />
         `;
         grid.appendChild(card);
@@ -903,16 +993,20 @@
     }
 
     function removeImg(idx) {
+      if (publishingCourse || processingImages) return alert("請等待目前操作完成後再刪除照片。");
       uploadedImages.splice(idx, 1);
       renderImagePreviews();
     }
 
     async function submitCreateCourse() {
+      if (publishingCourse) return;
+      if (processingImages) return alert("請等待照片處理完成。");
       const courseId = document.getElementById("courseId").value.trim();
       const title = document.getElementById("title").value.trim();
       const content = document.getElementById("content").value.trim();
 
       if (!courseId || !title || !content) return alert("請將課程編號、主題名稱與詳細條目填寫完整！");
+      publishingCourse = true;
 
       const btn = document.getElementById("publishBtn");
       btn.disabled = true;
@@ -937,26 +1031,10 @@
           method: "POST",
           headers: { "Content-Type": "text/plain;charset=utf-8" },
           body: JSON.stringify(payload)
-        }, 120000, 0);
+        }, 300000, 0);
         if (result.status === "success") {
-          const lineRecipientIds = Array.isArray(result.lineRecipientIds) ? result.lineRecipientIds : activeRoster.map(person => person.id);
-          if (lineRecipientIds.length > 0) {
-            fetch(GAS_URL, {
-              method: "POST",
-              mode: "no-cors",
-              keepalive: true,
-              headers: { "Content-Type": "text/plain;charset=utf-8" },
-              body: JSON.stringify({
-                action: "notifyCourseLine",
-                adminId: currentAdmin.id,
-                empIdList: lineRecipientIds,
-                title: payload.title,
-                category: payload.category,
-                creator: payload.creator
-              })
-            }).catch(error => console.warn("LINE 背景通知未送達", error));
-          }
-          alert("課程建立成功！已同步至學員待辦清單，並已執行 LINE 通知處理。");
+          document.getElementById("draftStatus").innerText = "課程已發布。既有草稿仍保留，需要時可自行刪除（勿重複發布）。";
+          alert("課程建立成功！已同步至學員待辦清單（不發送 LINE 通知）。");
           toggleCreateForm();
           clearLocalCache(`courses:${currentAdmin.id}`);
           loadMyCourses();
@@ -966,8 +1044,9 @@
       } catch (err) {
         alert("連線建立異常！");
       } finally {
+        publishingCourse = false;
         btn.disabled = false;
-        btn.innerText = "確認建立課程並發布至學員待辦（自動執行 LINE 通知）";
+        btn.innerText = "確認建立課程並發布至學員待辦";
       }
     }
   </script>
