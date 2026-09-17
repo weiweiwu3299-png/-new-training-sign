@@ -152,8 +152,9 @@
   </div>
 
   <!-- 照片放大燈箱 -->
-  <div id="imageLightbox" class="fixed inset-0 bg-black/90 z-50 hidden flex flex-col justify-center items-center p-2" onclick="this.classList.add('hidden')">
-    <img id="lightboxImg" class="max-w-full max-h-[85vh] object-contain rounded-lg" />
+  <div id="imageLightbox" class="fixed inset-0 bg-black/90 z-50 hidden flex flex-col justify-center items-center gap-3 p-2" onclick="closeLightbox()">
+    <button type="button" onclick="event.stopPropagation();closeLightbox()" class="bg-white text-slate-800 rounded-xl px-6 py-3 font-bold">← 返回訓練</button>
+    <img id="lightboxImg" class="max-w-full max-h-[78vh] object-contain rounded-lg" onclick="event.stopPropagation()" />
   </div>
 
   <script>
@@ -413,8 +414,21 @@
 
     function openLightbox(url) {
       document.getElementById("lightboxImg").src = url;
+      if (document.getElementById("imageLightbox").classList.contains("hidden")) {
+        history.pushState({ trainingPhotoPreview: true }, "", window.location.href);
+      }
       document.getElementById("imageLightbox").classList.remove("hidden");
     }
+
+    function closeLightbox() {
+      if (document.getElementById("imageLightbox").classList.contains("hidden")) return;
+      document.getElementById("imageLightbox").classList.add("hidden");
+      if (history.state && history.state.trainingPhotoPreview) history.back();
+    }
+
+    window.addEventListener("popstate", () => {
+      document.getElementById("imageLightbox").classList.add("hidden");
+    });
 
     const sigModal = document.getElementById("sigCanvasModal");
     const canvas = document.getElementById("modalSigCanvas");
