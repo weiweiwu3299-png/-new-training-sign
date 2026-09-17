@@ -130,15 +130,6 @@
             <div id="imagePreviewGrid" class="grid grid-cols-2 md:grid-cols-4 gap-3 pt-1"></div>
           </div>
 
-          <div class="flex flex-wrap gap-2">
-            <select id="cloudDraftSelect" class="border rounded-lg p-2 text-sm"><option value="">選擇雲端草稿</option></select>
-            <button type="button" onclick="refreshCloudDrafts()" class="px-3 py-2 bg-slate-100 rounded-lg text-sm">重新整理草稿</button>
-            <button type="button" onclick="saveCourseDraft()" class="px-4 py-2 bg-slate-100 rounded-lg text-sm">儲存雲端草稿</button>
-            <button type="button" onclick="loadCourseDraft()" class="px-4 py-2 bg-slate-100 rounded-lg text-sm">編輯選取草稿</button>
-            <button type="button" onclick="deleteCourseDraft()" class="px-4 py-2 bg-red-50 text-red-600 rounded-lg text-sm">刪除選取草稿</button>
-            <button type="button" onclick="newCourseDraft()" class="px-3 py-2 bg-slate-100 rounded-lg text-sm">新增空白課程</button>
-          </div>
-          <p id="draftStatus" class="text-xs text-slate-500">草稿保存於公司雲端，可跨電腦編輯、刪除。只有正式開課後學員才看得到。</p>
           <button type="button" id="publishBtn" onclick="submitCreateCourse()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl transition shadow">
             正式開課並發布至學員待辦
           </button>
@@ -236,101 +227,6 @@
     const MAX_COURSE_IMAGES = 20;
     let processingImages = false;
     let publishingCourse = false;
-    let draftSelectedDepts = null;
-    let currentDraftId = null;
-    let currentDraftSavedAt = null;
-    let cloudDraftBusy = false;
-
-    async function saveCourseDraft() {
-      if (processingImages || publishingCourse || cloudDraftBusy) return alert("請等待目前操作完成。");
-      cloudDraftBusy = true;
-      try {
-        const draft = { savedAt: Date.now(), fields: {}, roster: activeRoster, images: uploadedImages,
-          depts: Array.from(document.querySelectorAll(".dept-box:checked"), box => box.value) };
-        ["category", "courseId", "title", "content"].forEach(id => draft.fields[id] = document.getElementById(id).value);
-        document.getElementById("draftStatus").innerText = "正在儲存雲端草稿…";
-        const result = await fetchJsonWithRetry(GAS_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify({ action: "saveCloudDraft", adminId: currentAdmin.id, draftId: currentDraftId, expectedSavedAt: currentDraftSavedAt, draft }) }, 300000, 0);
-        if (result.status !== "success") throw new Error(result.message || "儲存失敗");
-        currentDraftId = result.draftId; currentDraftSavedAt = result.savedAt;
-        document.getElementById("draftStatus").innerText = "雲端草稿已儲存：" + new Date(result.savedAt).toLocaleString() + "（尚未開課）";
-        await refreshCloudDrafts();
-      } catch (error) { document.getElementById("draftStatus").innerText = "雲端暫存失敗，目前表單仍保留。"; alert(error.message); }
-      finally { cloudDraftBusy = false; }
-    }
-
-    async function loadCourseDraft() {
-      if (processingImages || publishingCourse || cloudDraftBusy) return alert("請等待目前操作完成。");
-      const draftId = document.getElementById("cloudDraftSelect").value;
-      if (!draftId) return alert("請先選擇雲端草稿。");
-      if (!confirm("讀取草稿將取代目前尚未儲存的表單，確定讀取？")) return;
-      cloudDraftBusy = true;
-      try {
-        const result = await fetchJsonWithRetry(`${GAS_URL}?action=getCloudDraft&adminId=${encodeURIComponent(currentAdmin.id)}&draftId=${encodeURIComponent(draftId)}`, {}, 90000, 1);
-        if (result.status !== "success") throw new Error(result.message || "讀取失敗");
-        const draft = result.draft;
-        if (draft.publishedFileId) throw new Error("此草稿已正式開課，請從正式課程清單管理。");
-        currentDraftId = draftId; currentDraftSavedAt = draft.savedAt;
-        applyCourseDraft(draft);
-        document.getElementById("draftStatus").innerText = "正在編輯雲端草稿，修改後請再儲存或正式開課。";
-      } catch (error) { alert(error.message); }
-      finally { cloudDraftBusy = false; }
-    }
-
-    function applyCourseDraft(draft) {
-        window.clearTimeout(departmentRosterTimer);
-        departmentRosterRequestVersion++;
-        ["category", "courseId", "title", "content"].forEach(id => document.getElementById(id).value = draft.fields[id] || "");
-        activeRoster = draft.roster || [];
-        uploadedImages = (draft.images || []).slice(0, MAX_COURSE_IMAGES);
-        draftSelectedDepts = new Set(draft.depts || []);
-        departmentHasSelection = true;
-        document.querySelectorAll(".dept-box").forEach(box => box.checked = draftSelectedDepts.has(box.value));
-        renderRosterChips(); renderImagePreviews();
-    }
-
-    async function deleteCourseDraft() {
-      if (processingImages || publishingCourse || cloudDraftBusy) return alert("請等待目前操作完成。");
-      const draftId = document.getElementById("cloudDraftSelect").value;
-      if (!draftId) return alert("請先選擇雲端草稿。");
-      if (!confirm("確定刪除選取的雲端草稿？草稿檔案會移至公司 Drive 垃圾桶，正式課程不受影響。")) return;
-      cloudDraftBusy = true;
-      try {
-        const result = await fetchJsonWithRetry(GAS_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify({ action: "deleteCloudDraft", adminId: currentAdmin.id, draftId }) }, 90000, 0);
-        if (result.status !== "success") throw new Error(result.message || "刪除失敗");
-        if (currentDraftId === draftId) { currentDraftId = null; currentDraftSavedAt = null; }
-        document.getElementById("draftStatus").innerText = "雲端草稿已刪除。目前表單保留，可另存新草稿。";
-        await refreshCloudDrafts();
-      } catch (error) { alert(error.message); }
-      finally { cloudDraftBusy = false; }
-    }
-
-    async function refreshCloudDrafts() {
-      try {
-        const result = await fetchJsonWithRetry(`${GAS_URL}?action=getCloudDrafts&adminId=${encodeURIComponent(currentAdmin.id)}`, {}, 60000, 1);
-        if (result.status !== "success") throw new Error(result.message || "無法載入草稿");
-        const select = document.getElementById("cloudDraftSelect"), previous = select.value;
-        select.innerHTML = '<option value="">選擇雲端草稿</option>';
-        (result.drafts || []).forEach(draft => {
-          const option = document.createElement("option"); option.value = draft.draftId;
-          option.textContent = draft.name.replace(/^草稿_[^_]+_/, "").replace(/\.json$/, "") + " ｜ " + new Date(draft.updatedAt).toLocaleString();
-          select.appendChild(option);
-        });
-        select.value = currentDraftId || previous;
-      } catch (error) { console.warn(error); document.getElementById("draftStatus").innerText = "雲端草稿清單載入失敗：" + error.message; }
-    }
-
-    function newCourseDraft() {
-      if (processingImages || publishingCourse || cloudDraftBusy) return alert("請等待目前操作完成。");
-      if (!confirm("清空目前表單建立新課程？已儲存的雲端草稿不會刪除，未儲存修改會放棄。")) return;
-      currentDraftId = null; currentDraftSavedAt = null;
-      applyCourseDraft({ fields: { category: "宣導/告知/訓練" }, roster: [], images: [], depts: [] });
-      document.getElementById("cloudDraftSelect").value = "";
-      document.getElementById("draftStatus").innerText = "新課程尚未儲存、尚未發布。";
-    }
-
-
     let currentAdmin = null;
     let uploadedImages = [];
     let activeRoster = [];
@@ -400,7 +296,6 @@
       liveRosterData = [];
       currentCourse = null;
       departmentHasSelection = false;
-      draftSelectedDepts = null;
       departmentRosterRequestVersion++;
       courseRosterCache.clear();
       document.getElementById("currentAdminName").innerText = currentAdmin.name;
@@ -410,8 +305,6 @@
       renderStudentPortalQr();
       loadDepartmentCheckboxes();
       loadMyCourses();
-      currentDraftId = null; currentDraftSavedAt = null;
-      refreshCloudDrafts();
     }
 
     async function handleAdminLogin() {
@@ -875,7 +768,6 @@
         const label = document.createElement("label");
         label.className = "inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-white px-2 py-1 rounded border cursor-pointer";
         label.innerHTML = `<input type="checkbox" name="deptChoice" value="${dept}" onchange="onDeptChanged()" class="dept-box rounded"> ${dept}`;
-        if (draftSelectedDepts) label.querySelector("input").checked = draftSelectedDepts.has(dept);
         container.appendChild(label);
       });
     }
@@ -1043,7 +935,6 @@
 
     async function submitCreateCourse() {
       if (publishingCourse) return;
-      if (cloudDraftBusy) return alert("請等待草稿操作完成。");
       if (processingImages) return alert("請等待照片處理完成。");
       const courseId = document.getElementById("courseId").value.trim();
       const title = document.getElementById("title").value.trim();
@@ -1060,8 +951,6 @@
       const boxes = Array.from(document.querySelectorAll(".dept-box:checked"));
       const payload = {
         action: "createCourseBook",
-        draftId: currentDraftId,
-        expectedSavedAt: currentDraftSavedAt,
         category: document.getElementById("category").value,
         courseId: courseId,
         creator: currentAdmin.name,
@@ -1080,9 +969,6 @@
           body: JSON.stringify(payload)
         }, 300000, 0);
         if (result.status === "success") {
-          currentDraftId = null; currentDraftSavedAt = null;
-          document.getElementById("draftStatus").innerText = "課程已正式發布，請從正式課程清單管理。";
-          refreshCloudDrafts();
           alert("課程建立成功！已同步至學員待辦清單（不發送 LINE 通知）。");
           toggleCreateForm();
           clearLocalCache(`courses:${currentAdmin.id}`);
